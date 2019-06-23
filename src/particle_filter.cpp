@@ -66,8 +66,8 @@ void ParticleFilter::prediction(double delta_t, double std_pos[],
     {
          double vdt = velocity / yaw_rate;
          new_theta = particle.theta + yaw_rate * delta_t;
-         x = particle.x + vdt * (sin(new_theta) - sin(particle.theta));
-      	 y =  particle.y + vdt * (cos(particle.theta) - cos(new_theta));
+         x = particle.x + vdt * (std::sin(new_theta) - std::sin(particle.theta));
+      	 y =  particle.y + vdt * (std::cos(particle.theta) - std::cos(new_theta));
          particle.x = std::normal_distribution<double>(x, std_pos[0])(gen);
       	 particle.y = std::normal_distribution<double>(y, std_pos[1])(gen);
          particle.theta = std::normal_distribution<double>(new_theta, std_pos[0])(gen);
@@ -96,6 +96,42 @@ void ParticleFilter::dataAssociation(vector<LandmarkObs> predicted,
    }
 }
 
+LandmarkObs convertToLocalCoordinates(const Particle& particle, float map_x, float map_y)
+{
+  LandmarkObs prediction;
+  double relativeX = map_x - particle.x;
+  double relativeY = map_y -particle.y;
+  prediction.x = std::cos(-particle.theta) * relativeX - std::sin(-particle.theta) * relativeY;
+  prediction.y = std::cos(-particle.theta) * relativeY + std::sin(-particle.theta) * relativeX;
+  return std::move(prediction);
+}
+
+std::pair<double, double> convertToGlobalCoordinates(const Particle& particle, const LandmarkObs& local_landmark)
+{
+  std::pair<double, double> map_coordinate;
+  map_coordinate.first = particle.x + (cos(particle.theta) * local_landmark.x) - (sin(particle.theta) * local_landmark.y);
+  map_coordinate.second = particle.y + (sin(particle.theta) * local_landmark.x) + (cos(particle.theta) * local_landmark.y);
+  return std::move(map_coordinate);
+}
+
+double multiv_prob(double sig_x, double sig_y, double x_obs, double y_obs,
+                   double mu_x, double mu_y) {
+  // calculate normalization term
+  double gauss_norm;
+  gauss_norm = 1 / (2 * M_PI * sig_x * sig_y);
+
+  // calculate exponent
+  double exponent;
+  exponent = (pow(x_obs - mu_x, 2) / (2 * pow(sig_x, 2)))
+               + (pow(y_obs - mu_y, 2) / (2 * pow(sig_y, 2)));
+    
+  // calculate weight using normalization terms and exponent
+  double weight;
+  weight = gauss_norm * exp(-exponent);
+    
+  return weight;
+}
+
 void ParticleFilter::updateWeights(double sensor_range, double std_landmark[], 
                                    const vector<LandmarkObs> &observations, 
                                    const Map &map_landmarks) {
@@ -112,6 +148,36 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
    *   and the following is a good resource for the actual equation to implement
    *   (look at equation 3.33) http://planning.cs.uiuc.edu/node99.html
    */
+  
+  double sum_w = 0;
+  for (auto& particle: particles)
+  {
+    std::vector<LandmarkObs> predictions;
+    vector<LandmarkObs> part_obs = observations;
+    for (auto& landmark: map_landmarks.landmark_list)
+    {
+      if (dist(particle.x, particle.y, landmark.x_f, landmark.y_f) < sensor_range)
+      {
+         LandmarkObs land = convertToLocalCoordinates(particle, landmark.x_f, landmark.y_f);
+         land.id = landmark.id_i;
+         predictions.push_back(land);
+      }
+    }
+    dataAssociation(predictions, part_obs);
+    
+    particle.weight = 1;
+    for (const auto& obs : part_obs)
+    {
+      const auto global_obs = convertToGlobalCoordinates(particle, obs);
+      particle.weight *= multiv_prob(std_landmark[0], std_landmark[1], global_obs.first, global_obs.second, 
+                                     map_landmarks.landmark_list[obs.id].x_f, map_landmarks.landmark_list[obs.id].y_f);
+    }
+    sum_w += particle.weight;
+  }
+  for (auto& particle: particles)
+  {
+    particle.weight /= sum_w;
+  }
 
 }
 
@@ -163,3 +229,4 @@ string ParticleFilter::getSenseCoord(Particle best, string coord) {
   s = s.substr(0, s.length()-1);  // get rid of the trailing space
   return s;
 }
+
