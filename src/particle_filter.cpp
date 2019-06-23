@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "helper_functions.h"
+#include <random> // Need this for sampling from distributions
 
 using std::string;
 using std::vector;
@@ -30,8 +31,21 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
    * NOTE: Consult particle_filter.h for more information about this method 
    *   (and others in this file).
    */
-  num_particles = 0;  // TODO: Set the number of particles
+  num_particles = 1000;
+  
+  std::default_random_engine gen;
+  // This line creates a normal (Gaussian) distribution for x
+  std::normal_distribution<double> dist_x(x, std[0]);
 
+  std::normal_distribution<double> dist_y(y, std[1]);
+
+  std::normal_distribution<double> dist_theta(theta, std[2]);
+  
+  particles.reserve(num_particles);
+  for (int i = 0; i < num_particles; ++ i)
+  {
+    particles.push_back(Particle(i, dist_x(gen), dist_y(gen), dist_theta(gen), 1));
+  }
 }
 
 void ParticleFilter::prediction(double delta_t, double std_pos[], 
@@ -43,7 +57,21 @@ void ParticleFilter::prediction(double delta_t, double std_pos[],
    *  http://en.cppreference.com/w/cpp/numeric/random/normal_distribution
    *  http://www.cplusplus.com/reference/random/default_random_engine/
    */
-
+  
+    std::default_random_engine gen;
+  	double new_theta;
+  	double x;
+  	double y;
+    for (auto& particle: particles)
+    {
+         double vdt = velocity / yaw_rate;
+         new_theta = particle.theta + yaw_rate * delta_t;
+         x = particle.x + vdt * (sin(new_theta) - sin(particle.theta));
+      	 y =  particle.y + vdt * (cos(particle.theta) - cos(new_theta));
+         particle.x = std::normal_distribution<double>(x, std_pos[0])(gen);
+      	 particle.y = std::normal_distribution<double>(y, std_pos[1])(gen);
+         particle.theta = std::normal_distribution<double>(new_theta, std_pos[0])(gen);
+    }
 }
 
 void ParticleFilter::dataAssociation(vector<LandmarkObs> predicted, 
@@ -56,7 +84,16 @@ void ParticleFilter::dataAssociation(vector<LandmarkObs> predicted,
    *   probably find it useful to implement this method and use it as a helper 
    *   during the updateWeights phase.
    */
-
+  std::vector<int> result;
+   result.reserve(predicted.size());
+   for (auto& obs: observations)
+   {
+     auto min_to_pred = [&obs](const LandmarkObs& pred1, const LandmarkObs& pred2) {
+       return dist(obs.x, obs.y, pred1.x, pred1.y) < dist(obs.x, obs.y, pred2.x, pred2.y);
+     };
+     auto iter = std::min_element(predicted.begin(), predicted.end(), min_to_pred);
+     obs.id = iter->id;
+   }
 }
 
 void ParticleFilter::updateWeights(double sensor_range, double std_landmark[], 

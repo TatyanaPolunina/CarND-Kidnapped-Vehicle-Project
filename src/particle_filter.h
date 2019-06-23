@@ -14,6 +14,13 @@
 #include "helper_functions.h"
 
 struct Particle {
+  Particle()
+  {
+  }
+  Particle(const int id, double x, double y, double theta, double weight)
+    : id(id), x(x), y(y), theta(theta), weight(weight)
+  {
+  }
   int id;
   double x;
   double y;
