@@ -72,7 +72,7 @@ void ParticleFilter::prediction(double delta_t, double std_pos[],
       	 y =  particle.y + vdt * (std::cos(particle.theta) - std::cos(new_theta));
          particle.x = std::normal_distribution<double>(x, std_pos[0])(gen);
       	 particle.y = std::normal_distribution<double>(y, std_pos[1])(gen);
-         particle.theta = std::normal_distribution<double>(new_theta, std_pos[0])(gen);
+         particle.theta = std::normal_distribution<double>(new_theta, std_pos[2])(gen);
     }
 }
 
@@ -86,8 +86,6 @@ void ParticleFilter::dataAssociation(vector<LandmarkObs> predicted,
    *   probably find it useful to implement this method and use it as a helper 
    *   during the updateWeights phase.
    */
-  std::vector<int> result;
-   result.reserve(predicted.size());
    for (auto& obs: observations)
    {
      auto min_to_pred = [&obs](const LandmarkObs& pred1, const LandmarkObs& pred2) {
@@ -103,16 +101,16 @@ LandmarkObs convertToLocalCoordinates(const Particle& particle, float map_x, flo
   LandmarkObs prediction;
   double relativeX = map_x - particle.x;
   double relativeY = map_y -particle.y;
-  prediction.x = std::cos(-particle.theta) * relativeX - std::sin(-particle.theta) * relativeY;
-  prediction.y = std::cos(-particle.theta) * relativeY + std::sin(-particle.theta) * relativeX;
+  prediction.x = std::cos(particle.theta) * relativeX + std::sin(particle.theta) * relativeY;
+  prediction.y = std::cos(particle.theta) * relativeY - std::sin(particle.theta) * relativeX;
   return std::move(prediction);
 }
 
 std::pair<double, double> convertToGlobalCoordinates(const Particle& particle, const LandmarkObs& local_landmark)
 {
   std::pair<double, double> map_coordinate;
-  map_coordinate.first = particle.x + (cos(particle.theta) * local_landmark.x) - (sin(particle.theta) * local_landmark.y);
-  map_coordinate.second = particle.y + (sin(particle.theta) * local_landmark.x) + (cos(particle.theta) * local_landmark.y);
+  map_coordinate.first = particle.x + cos(particle.theta) * local_landmark.x - sin(particle.theta) * local_landmark.y;
+  map_coordinate.second = particle.y + sin(particle.theta) * local_landmark.x + cos(particle.theta) * local_landmark.y;
   return std::move(map_coordinate);
 }
 
@@ -120,16 +118,15 @@ double multiv_prob(double sig_x, double sig_y, double x_obs, double y_obs,
                    double mu_x, double mu_y) {
   // calculate normalization term
   double gauss_norm;
-  gauss_norm = 1 / (2 * M_PI * sig_x * sig_y);
-
+  gauss_norm = 1.0 / (2 * M_PI * sig_x * sig_y);
+  std::cout << "gauss" << gauss_norm;
   // calculate exponent
   double exponent;
   exponent = (pow(x_obs - mu_x, 2) / (2 * pow(sig_x, 2)))
                + (pow(y_obs - mu_y, 2) / (2 * pow(sig_y, 2)));
-    
+  std::cout <<" exp " <<exponent;  
   // calculate weight using normalization terms and exponent
-  double weight;
-  weight = gauss_norm * exp(-exponent);
+  double weight = gauss_norm * exp(-exponent);
     
   return weight;
 }
@@ -151,11 +148,10 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
    *   (look at equation 3.33) http://planning.cs.uiuc.edu/node99.html
    */
   
-  double sum_w = 0;
+  double sum_w = 0.0;
   for (auto& particle: particles)
   {
-    std::vector<LandmarkObs> predictions;
-    vector<LandmarkObs> part_obs = observations;
+    std::vector<LandmarkObs> predictions;    
     for (auto& landmark: map_landmarks.landmark_list)
     {
       if (dist(particle.x, particle.y, landmark.x_f, landmark.y_f) < sensor_range)
@@ -165,18 +161,25 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
          predictions.push_back(land);
       }
     }
+    
+    vector<LandmarkObs> part_obs = observations;
     dataAssociation(predictions, part_obs);
     
     particle.weight = 1;
     for (const auto& obs : part_obs)
     {
       const auto global_obs = convertToGlobalCoordinates(particle, obs);
-      particle.weight *= multiv_prob(std_landmark[0], std_landmark[1], global_obs.first, global_obs.second, 
+      double weight = multiv_prob(std_landmark[0], std_landmark[1], global_obs.first, global_obs.second, 
                                      map_landmarks.landmark_list[obs.id].x_f, map_landmarks.landmark_list[obs.id].y_f);
+      particle.weight *= weight;
+      std::cout<< " obs " << obs.x << ' ' << obs.y << std::endl;
+      std::cout<< "gobs " << global_obs.first << ' ' <<  global_obs.second << std::endl;
+      std::cout<< "land " <<  map_landmarks.landmark_list[obs.id].x_f << ' ' <<  map_landmarks.landmark_list[obs.id].y_f <<  std::endl;
     }
     sum_w += particle.weight;
   }
   int i = 0;
+  std::cout << "Sum " << sum_w << std::endl;
   for (auto& particle: particles)
   {
     particle.weight /= sum_w;
@@ -193,8 +196,10 @@ void ParticleFilter::resample() {
    */
    std::default_random_engine gen;
    std::discrete_distribution<> d(weights.begin(), weights.end());
+   double minW = *std::min_element(weights.begin(), weights.end());
+   std::cout << "min W: " << minW << std::endl;
    std::vector<Particle> new_particles;
-  new_particles.reserve(num_particles);
+   new_particles.reserve(num_particles);
    for (int i = 0; i < num_particles; ++i)
    {
      new_particles.push_back(particles[d(gen)]);
